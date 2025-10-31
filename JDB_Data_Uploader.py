@@ -792,7 +792,29 @@ def objects_flow():
                 val = "" if pd.isna(r.get(csvc,"")) else str(r.get(csvc,""))
                 target_boem.setdefault(qid, {})[fid] = val
 
-            stub = by_id.get(obj_id_val) if obj_id_val else by_title.get(title_target)
+            # Resolve by ID if provided; if ID not found, attempt to fall back to Title.
+            # Track unresolved/mismatched ID so we can mark it in the preview.
+            had_id = bool(obj_id_val)
+            id_found = (obj_id_val in by_id) if had_id else False
+            title_found = (title_target in by_title) and (by_title.get(title_target) is not None)
+
+            id_unresolved = False
+            stub = None
+            if had_id:
+                if id_found:
+                    stub = by_id.get(obj_id_val)
+                else:
+                    # ID was provided but not found — try title fallback
+                    if title_found:
+                        stub = by_title.get(title_target)
+                        # mark that the provided ID did not resolve but we used the title match
+                        id_unresolved = True
+                    else:
+                        # ID provided but not found and title not found => no match
+                        stub = None
+                        id_unresolved = True
+            else:
+                stub = by_title.get(title_target)
 
             # Build duplicate key only when both IDs are known (after resolving)
             curr_id = ""
@@ -809,8 +831,9 @@ def objects_flow():
                 curr_life = str(detail.get("object_lifecycle_state","") or "")
 
                 row = {"Action":"Update","Object_Title":title_target,"Id":detail["id"],"Lifecycle":life_raw}
+                # mark Id invalid if the CSV supplied an ID that didn't resolve
                 mask_change = {"Action":False,"Object_Title":(title_target!=curr_title),"Id":False,"Lifecycle":False}
-                mask_invalid = {"Action":False,"Object_Title":False,"Id":False,"Lifecycle":False}
+                mask_invalid = {"Action":False,"Object_Title":False,"Id":bool(id_unresolved),"Lifecycle":False}
                 any_change = (title_target!=curr_title)
 
                 if life_raw != "":
@@ -856,6 +879,8 @@ def objects_flow():
                     lifecycle_update = life_raw if (life_raw in ALLOWED_LIFECYCLE and life_raw != curr_life) else None
                     meta.append({
                         "new": False, "id": detail["id"],
+                        "original_id_provided": obj_id_val if had_id else None,
+                        "id_mismatch": bool(id_unresolved),
                         "title_update": title_target if (title_target!=curr_title) else None,
                         "title": title_target,
                         "boem_updates": boem_updates,
@@ -865,8 +890,9 @@ def objects_flow():
             else:
                 # --- Create path (same as before) ---
                 row={"Action":"Create","Object_Title":title_target,"Id":"","Lifecycle":life_raw}
+                # If the CSV supplied an ID that couldn't be found, mark Id invalid so user can see mismatch.
                 mask_change={"Action":False,"Object_Title":True,"Id":False,"Lifecycle": (life_raw != "" and life_raw in ALLOWED_LIFECYCLE)}
-                mask_invalid={"Action":False,"Object_Title":False,"Id":False,"Lifecycle": (life_raw != "" and life_raw not in ALLOWED_LIFECYCLE)}
+                mask_invalid={"Action":False,"Object_Title":False,"Id":bool(id_unresolved),"Lifecycle": (life_raw != "" and life_raw not in ALLOWED_LIFECYCLE)}
                 for pname in prop_map.keys():
                     key=f"objectproperty_{pname}"
                     v = target_props.get(pname, "")
@@ -878,7 +904,9 @@ def objects_flow():
                     mask_invalid[key]= (v!="" and not _validate_value(qid,fid,v))
                 rows.append(row); change_rows.append(mask_change); invalid_rows.append(mask_invalid)
                 lifecycle_val = life_raw if life_raw in ALLOWED_LIFECYCLE else None
-                meta.append({"new": True,"id":"","title":title_target,"boem":target_boem,"props":target_props,"lifecycle": lifecycle_val})
+                meta.append({"new": True,"id":"","title":title_target,"boem":target_boem,"props":target_props,"lifecycle": lifecycle_val,
+                             "original_id_provided": obj_id_val if had_id else None,
+                             "id_mismatch": bool(id_unresolved)})
 
         if not rows:
             st.info("Nothing to create or update based on current mapping.")
