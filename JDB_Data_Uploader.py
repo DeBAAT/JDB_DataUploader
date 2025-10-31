@@ -24,7 +24,7 @@ import streamlit as st
 
 ALLOWED_LIFECYCLE = {"Current", "Future"}
 
-st.set_page_config(page_title="BlueDolphin Uploader v0.93", layout="wide")
+st.set_page_config(page_title="BlueDolphin Uploader v0.94", layout="wide")
 st.title("JDB BlueDolphin CSV/Excel Uploader")
 
 # ---------------- Sidebar: connection + mode ----------------
@@ -58,7 +58,7 @@ with st.sidebar.expander("Configuration", expanded=False):
         st.session_state["rel_upload_session"] = st.session_state.get("rel_upload_session", 0) + 1
         st.rerun()
 
-    if st.button("Save configuration (without tenant & key)"):
+    if st.button("Save configuration (without key)"):
         # Build a snapshot of session_state excluding secrets and ephemeral UI/server objects
         exclude_prefixes = ("preview_")
         exclude_keys = {
@@ -90,13 +90,59 @@ with st.sidebar.expander("Configuration", expanded=False):
             mime="application/json"
         )
 
-    if st.button("Load configuration (without tenant & key)"):
-        # Load a previously saved snapshot of session_state excluding secrets and ephemeral UI/server objects
+    # Load configuration: select a local JSON file and apply into st.session_state
+    cfg_file = st.file_uploader("Load configuration JSON (without key)", type=["json"], key="cfg_loader")
+    if cfg_file:
+        try:
+            raw = cfg_file.read()
+            try:
+                text = raw.decode("utf-8")
+            except Exception:
+                text = raw.decode("latin-1")
+            cfg = json.loads(text)
+            if not isinstance(cfg, dict):
+                st.error("Configuration file must contain a JSON object (key/value map)."); cfg = None
+        except Exception as e:
+            st.error(f"Failed to read configuration file: {e}"); cfg = None
 
-        # Restate session_state and rerun when finished
-        st.session_state["obj_upload_session"] = st.session_state.get("obj_upload_session", 0) + 1
-        st.session_state["rel_upload_session"] = st.session_state.get("rel_upload_session", 0) + 1
-        st.rerun()
+        if cfg is not None:
+            include_secrets = st.checkbox("Also restore API key (sensitive)", value=False, key="cfg_include_secrets")
+            if st.button("Apply loaded configuration", key="cfg_apply_btn"):
+                # Keys/prefixes we never restore by default
+                exclude_prefixes = ("preview_", "obj_uploader", "rel_uploader")
+                exclude_keys = {
+                    "log_entries", "log_placeholder", "rate_box",
+                    "obj_preview_btn", "rel_preview_btn", "obj_apply_btn", "rel_apply_btn",
+                    "obj_upload_session", "rel_upload_session"
+                }
+
+                applied = 0
+                skipped = 0
+                for k, v in cfg.items():
+                    if k in ("tenant", "api_key") and not include_secrets:
+                        skipped += 1; continue
+                    if k in exclude_keys:
+                        skipped += 1; continue
+                    if any(k.startswith(p) for p in exclude_prefixes):
+                        skipped += 1; continue
+                    # Apply value (simple assignment)
+                    st.session_state[k] = v
+                    applied += 1
+
+                st.success(f"Applied {applied} keys, skipped {skipped} keys.")
+                # Do NOT bump upload session counters here — keeping them unchanged preserves the
+                # file_uploader contents so the previously uploaded CSV/Excel stays selected.
+                # st.session_state["obj_upload_session"] = st.session_state.get("obj_upload_session", 0) + 1
+                # st.session_state["rel_upload_session"] = st.session_state.get("rel_upload_session", 0) + 1
+
+                # Clear any preview-state that might have been present in the loaded config so the
+                # app waits for the user to press "Generate preview" before enabling "Apply now".
+                for _k in ("preview_df", "preview_mask_change", "preview_mask_invalid", "preview_meta",
+                           "confirm_apply_invalid"):
+                    st.session_state.pop(_k, None)
+                # Ensure UI returns to the mapping step (step 4) after rerun and shows the Generate preview button.
+                st.session_state["obj_current_step"] = 4
+                # st.rerun()
 
 # --- state init ---
 for k, v in [
@@ -521,6 +567,7 @@ def objects_flow():
 
     # ---------------- Step 3 (mapping) ----------------
     st.header("3) Mapping")
+
     with st.spinner("Loading questionnaires & properties…"):
         definition = get_object_definition(object_def_id)
 
@@ -660,6 +707,12 @@ def objects_flow():
 
     # ---------------- Step 4 (preview) ----------------
     st.header("4) Preview")
+    # If a loaded configuration requested to return to mapping, show a short notice
+    if st.session_state.get("obj_current_step") == 4:
+        st.info("Configuration applied. Review mapping and press **Generate preview** to build the preview.")
+        # Clear the flag so the notice only shows once after rerun
+        st.session_state.pop("obj_current_step", None)
+
     preview_clicked = st.button("Generate preview", key="obj_preview_btn")
     if preview_clicked:
         with st.spinner("Retrieving existing objects…"):
