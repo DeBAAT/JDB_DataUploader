@@ -1,4 +1,4 @@
-# JDB_Data_Uploader_v0_93.py
+# JDB_Data_Uploader_v0_94.py
 # Streamlit app to upload/update BlueDolphin objects + create relationships
 # This software is under an MIT License (see root of project)
 # v0.94:
@@ -25,7 +25,7 @@ import streamlit as st
 ALLOWED_LIFECYCLE = {"Current", "Future"}
 
 st.set_page_config(page_title="BlueDolphin Uploader v0.93", layout="wide")
-st.title("BlueDolphin CSV/Excel Uploader")
+st.title("JDB BlueDolphin CSV/Excel Uploader")
 
 # ---------------- Sidebar: connection + mode ----------------
 with st.sidebar:
@@ -39,6 +39,9 @@ with st.sidebar:
     mode = st.radio("Mode", ["Objects", "Relationships"], index=0, horizontal=True)
 
     st.divider()
+
+# ---------------- Configuration (sidebar): Reset + Save + Load ----------------
+with st.sidebar.expander("Configuration", expanded=False):
     if st.button("Reset configuration (keep tenant & key)"):
         keep = {"debug_mode","log_show_ok"}
         for k in list(st.session_state.keys()):
@@ -55,9 +58,45 @@ with st.sidebar:
         st.session_state["rel_upload_session"] = st.session_state.get("rel_upload_session", 0) + 1
         st.rerun()
 
-    st.divider()
     if st.button("Save configuration (without tenant & key)"):
-        keep = {"debug_mode","log_show_ok"}
+        # Build a snapshot of session_state excluding secrets and ephemeral UI/server objects
+        exclude_prefixes = ("preview_")
+        exclude_keys = {
+            "api_key"
+        }
+
+        cfg = {}
+        for k, v in st.session_state.items():
+            if k in exclude_keys:
+                continue
+            if any(k.startswith(p) for p in exclude_prefixes):
+                continue
+            # Only include simple serializable types (fallback to str for others)
+            try:
+                json.dumps(v)
+                cfg[k] = v
+            except Exception:
+                cfg[k] = str(v)
+
+        cfg_json = json.dumps(cfg, indent=2, ensure_ascii=False)
+
+        # Provide the JSON as a downloadable file (client-side download, no server save)
+        date_str = datetime.date.today().strftime("%Y-%m-%d")
+        download_name = f"bdu_config_{date_str}.json"
+        st.download_button(
+            label="Download configuration JSON",
+            data=cfg_json,
+            file_name=download_name,
+            mime="application/json"
+        )
+
+    if st.button("Load configuration (without tenant & key)"):
+        # Load a previously saved snapshot of session_state excluding secrets and ephemeral UI/server objects
+
+        # Restate session_state and rerun when finished
+        st.session_state["obj_upload_session"] = st.session_state.get("obj_upload_session", 0) + 1
+        st.session_state["rel_upload_session"] = st.session_state.get("rel_upload_session", 0) + 1
+        st.rerun()
 
 # --- state init ---
 for k, v in [
