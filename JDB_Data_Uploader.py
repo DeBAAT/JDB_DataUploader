@@ -1,6 +1,8 @@
-# BD_Data_Uploader_v0_93.py
+# JDB_Data_Uploader_v0_93.py
 # Streamlit app to upload/update BlueDolphin objects + create relationships
 # This software is under an MIT License (see root of project)
+# v0.94:
+#   - Add option to store and re-use configuration settings.
 # v0.93:
 #   - Relationships preview: keep the FIRST (from_id,to_id[,label]) and mark all later
 #     duplicates as "Skip: duplicate". First one still checks/obeys "Skip (exists)" and
@@ -52,6 +54,10 @@ with st.sidebar:
         st.session_state["obj_upload_session"] = st.session_state.get("obj_upload_session", 0) + 1
         st.session_state["rel_upload_session"] = st.session_state.get("rel_upload_session", 0) + 1
         st.rerun()
+
+    st.divider()
+    if st.button("Save configuration (without tenant & key)"):
+        keep = {"debug_mode","log_show_ok"}
 
 # --- state init ---
 for k, v in [

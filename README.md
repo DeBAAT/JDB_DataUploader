@@ -1,8 +1,8 @@
-# BDdatauploader
+# JDBDataUploader
 
-This project provides tools to upload and explore data in BlueDolphin using its public API.  
+This project is a fork of the original tool to upload and explore data in BlueDolphin using its public API.  
 The main application is built with [Streamlit](https://streamlit.io) and running on a community edition: 
-    https://bd-datauploader.streamlit.app/
+    https://jdb-datauploader.streamlit.app/
 
 ## License
 This project is licensed under the MIT License. See the MIT License.txt file for details.
@@ -42,7 +42,7 @@ This project is licensed under the MIT License. See the MIT License.txt file for
 
 4. Run the Streamlit app:
 
-   streamlit run BD_Data_Uploader.py
+   streamlit run JDB_Data_Uploader.py
 
 5. Open the URL shown in the terminal (usually http://localhost:8501) in your browser.
 
