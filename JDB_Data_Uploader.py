@@ -42,6 +42,7 @@ with st.sidebar:
 
 # ---------------- Configuration (sidebar): Reset + Save + Load ----------------
 with st.sidebar.expander("Configuration", expanded=False):
+    # Reset the current configuration
     if st.button("Reset configuration (keep tenant & key)"):
         keep = {"debug_mode","log_show_ok"}
         for k in list(st.session_state.keys()):
@@ -58,6 +59,7 @@ with st.sidebar.expander("Configuration", expanded=False):
         st.session_state["rel_upload_session"] = st.session_state.get("rel_upload_session", 0) + 1
         st.rerun()
 
+    # Save configuration: create a local JSON file and offer to download it client-side
     if st.button("Save configuration (without key)"):
         # Build a snapshot of session_state excluding secrets and ephemeral UI/server objects
         exclude_prefixes = ("preview_")
@@ -111,8 +113,9 @@ with st.sidebar.expander("Configuration", expanded=False):
                 # Keys/prefixes we never restore by default
                 exclude_prefixes = ("preview_", "obj_uploader", "rel_uploader")
                 exclude_keys = {
-                    "log_entries", "log_placeholder", "rate_box",
-                    "obj_preview_btn", "rel_preview_btn", "obj_apply_btn", "rel_apply_btn",
+                    "log_entries", "log_placeholder", "cfg_loader", "rate_box",
+                    "cfg_apply_btn", "cfg_include_secrets",
+                    "obj_apply_btn", "rel_apply_btn", "obj_preview_btn", "rel_preview_btn",
                     "obj_upload_session", "rel_upload_session"
                 }
 
