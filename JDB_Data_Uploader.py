@@ -22,7 +22,31 @@ import pandas as pd
 import requests
 import streamlit as st
 
-ALLOWED_LIFECYCLE = {"Current", "Future", "Huidig", "Toekomst"}
+# Accepted input values (either English or Dutch). For API payload we use the canonical English values.
+ACCEPTABLE_LIFECYCLE_INPUT = {"Current", "Future", "Huidig", "Toekomst"}
+ALLOWED_LIFECYCLE = {"Current", "Future"}  # canonical values used when sending to API
+
+def _canonical_lifecycle(val: str) -> Optional[str]:
+    """Return canonical English lifecycle ('Current'|'Future') for an input value, or None if unknown/empty."""
+    if val is None: return None
+    v = str(val).strip()
+    if not v: return None
+    m = v.lower()
+    if m == "current": return "Current"
+    if m == "future": return "Future"
+    if m == "huidig": return "Current"
+    if m == "toekomst": return "Future"
+    return None
+
+def _lifecycle_lang(val: str) -> Optional[str]:
+    """Return 'en' or 'nl' depending on language of the provided value; None for empty/unknown."""
+    if val is None: return None
+    v = str(val).strip()
+    if not v: return None
+    m = v.lower()
+    if m in ("current", "future"): return "en"
+    if m in ("huidig", "toekomst"): return "nl"
+    return None
 
 st.set_page_config(page_title="BlueDolphin Uploader v0.94", layout="wide")
 st.title("JDB BlueDolphin CSV/Excel Uploader")
@@ -846,8 +870,11 @@ def objects_flow():
         for _, r in df.iterrows():
             title_target = str(r.get(title_col, "")).strip()
             if not title_target: continue
-            obj_id_val = "" if object_id_col=="(none)" else str(r.get(object_id_col, "")).strip()
-            life_raw = "" if lifecycle_col=="(none)" else str(r.get(lifecycle_col, "") or "").strip()
+            obj_id_val = "" if object_id_col == "(none)" else str(r.get(object_id_col, "")).strip()
+            life_raw = "" if lifecycle_col == "(none)" else (str(r.get(lifecycle_col, "") or "").strip())
+            # Derive canonical English value (for comparison / payload) and detected language
+            life_canon = _canonical_lifecycle(life_raw)
+            life_lang = _lifecycle_lang(life_raw)
             if _is_logging():
                 _log("error", f"obj_id_val {obj_id_val}: (title_target)={title_target}!")
 
@@ -910,10 +937,11 @@ def objects_flow():
                 any_change = (title_target!=curr_title)
 
                 if life_raw != "":
-                    if life_raw not in ALLOWED_LIFECYCLE:
+                    # Accept both Dutch and English inputs; determine canonical English value.
+                    if life_canon is None:
                         mask_invalid["Lifecycle"] = True
                     else:
-                        chg_life = (life_raw != curr_life)
+                        chg_life = (life_canon != curr_life)
                         mask_change["Lifecycle"] = chg_life
                         any_change |= chg_life
 
@@ -949,7 +977,7 @@ def objects_flow():
                     prop_updates = {pname: target_props[pname]
                                     for pname in prop_map.keys()
                                     if str(target_props[pname]) != str(curr_props.get(pname, ""))}
-                    lifecycle_update = life_raw if (life_raw in ALLOWED_LIFECYCLE and life_raw != curr_life) else None
+                    lifecycle_update = life_canon if (life_canon is not None and life_canon != curr_life) else None
                     meta.append({
                         "new": False, "id": detail["id"],
                         "original_id_provided": obj_id_val if had_id else None,
@@ -958,7 +986,9 @@ def objects_flow():
                         "title": title_target,
                         "boem_updates": boem_updates,
                         "prop_updates": prop_updates,
-                        "lifecycle_update": lifecycle_update
+                        "lifecycle_update": lifecycle_update,
+                        "lifecycle_raw": (life_raw or None),
+                        "lifecycle_lang": life_lang
                     })
             else:
                 # --- Create path (same as before) ---
@@ -976,10 +1006,15 @@ def objects_flow():
                     row[key]=v; mask_change[key]=True
                     mask_invalid[key]= (v!="" and not _validate_value(qid,fid,v))
                 rows.append(row); change_rows.append(mask_change); invalid_rows.append(mask_invalid)
-                lifecycle_val = life_raw if life_raw in ALLOWED_LIFECYCLE else None
-                meta.append({"new": True,"id":"","title":title_target,"boem":target_boem,"props":target_props,"lifecycle": lifecycle_val,
-                             "original_id_provided": obj_id_val if had_id else None,
-                             "id_mismatch": bool(id_unresolved)})
+                lifecycle_val = life_canon if life_canon is not None else None
+                meta.append({
+                    "new": True, "id": "", "title": title_target, "boem": target_boem, "props": target_props,
+                    "lifecycle": lifecycle_val,
+                    "original_id_provided": obj_id_val if had_id else None,
+                    "id_mismatch": bool(id_unresolved),
+                    "lifecycle_raw": (life_raw or None),
+                    "lifecycle_lang": life_lang
+                })
 
         if not rows:
             st.info("Nothing to create or update based on current mapping.")
