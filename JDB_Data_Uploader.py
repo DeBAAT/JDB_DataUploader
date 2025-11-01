@@ -22,7 +22,7 @@ import pandas as pd
 import requests
 import streamlit as st
 
-ALLOWED_LIFECYCLE = {"Current", "Future"}
+ALLOWED_LIFECYCLE = {"Current", "Future", "Huidig", "Toekomst"}
 
 st.set_page_config(page_title="BlueDolphin Uploader v0.94", layout="wide")
 st.title("JDB BlueDolphin CSV/Excel Uploader")
