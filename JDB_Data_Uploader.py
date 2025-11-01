@@ -998,7 +998,17 @@ def objects_flow():
             GREEN_BG, GREEN_FG = "#b6f3b6", "#064b2d"
 
             def style_cell(val, col, idx):
-                if col in ("Action","Id"): return ""
+                if col in ("Action"): return ""
+                # Only suppress styling for the Id column when the user did NOT map an Object ID column.
+                if col == "Id":
+                    if object_id_col == "(none)":
+                        return ""
+                    # For Id column: only show invalid (red). Don't show green/blue for OK/changed.
+                    inv_id = bool(invalid_df.loc[idx, col]) if col in invalid_df.columns else False
+                    if inv_id:
+                        bg, fg = RED_BG, RED_FG
+                        return f"background-color:{bg}; color:{fg}; font-weight:600;"
+                    return ""
                 inv = bool(invalid_df.loc[idx, col]) if col in invalid_df.columns else False
                 chg = bool(change_df.loc[idx, col]) if col in change_df.columns else False
                 if inv:   bg, fg = RED_BG, RED_FG
