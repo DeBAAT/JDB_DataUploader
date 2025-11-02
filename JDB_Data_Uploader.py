@@ -1,4 +1,4 @@
-# JDB_Data_Uploader_v0_94.py
+# BD_Data_Uploader_v0_94.py
 # Streamlit app to upload/update BlueDolphin objects + create relationships
 # This software is under an MIT License (see root of project)
 # v0.94:
@@ -53,7 +53,7 @@ def _lifecycle_lang(val: str) -> Optional[str]:
     return None
 
 st.set_page_config(page_title="BlueDolphin Uploader v0.94", layout="wide")
-st.title("JDB BlueDolphin CSV/Excel Uploader")
+st.title("BlueDolphin CSV/Excel Uploader")
 
 # ---------------- Sidebar: connection + mode ----------------
 with st.sidebar:
@@ -161,10 +161,6 @@ with st.sidebar.expander("Configuration", expanded=False):
                     applied += 1
 
                 st.success(f"Applied {applied} keys, skipped {skipped} keys.")
-                # Do NOT bump upload session counters here — keeping them unchanged preserves the
-                # file_uploader contents so the previously uploaded CSV/Excel stays selected.
-                # st.session_state["obj_upload_session"] = st.session_state.get("obj_upload_session", 0) + 1
-                # st.session_state["rel_upload_session"] = st.session_state.get("rel_upload_session", 0) + 1
 
                 # Clear any preview-state that might have been present in the loaded config so the
                 # app waits for the user to press "Generate preview" before enabling "Apply now".
@@ -254,7 +250,7 @@ with st.sidebar.expander("Advanced", expanded=False):
             if entry["level"] in ("ok", "info") and not show_ok:
                 continue
             filtered.append(entry)
-        filtered = filtered[:200]
+        filtered = filtered[:20]
         html_lines = []
         for e in filtered:
             color = "#B00020" if e["level"] == "error" else ("#666" if e["level"] == "info" else "#1f4b2e")
@@ -753,65 +749,6 @@ def objects_flow():
         by_title = {str((o.get("object_title") or o.get("title"))): o for o in existing if (o.get("object_title") or o.get("title"))}
         # Build a lower-case lookup to allow case-insensitive matching of IDs later
         lower_by_id = {str(k).lower(): k for k in by_id.keys()}
-        if _is_logging():
-            _log("info", f"objects discovered (by object_def_id): {len(existing)}, (by_id): {len(by_id)}, (by_title): {len(by_title)}")
-            # Log first 10 entries from existing for debugging
-            try:
-                first_existing = existing[:10]
-                for idx, obj in enumerate(first_existing, start=1):
-                    obj_id = obj.get("id") if isinstance(obj, dict) else None
-                    title = obj.get("object_title") or obj.get("title") or ""
-                    keys = list(obj.keys())[:10] if isinstance(obj, dict) else []
-                    _log("info", f"existing[{idx}] id={obj_id!s} title={title!s} keys={keys}")
-            except Exception as _e0:
-                _log("info", f"Failed to log existing entries: {_e0}")
-
-            # Log first 10 entries from by_id for debugging
-            try:
-                first_items = list(by_id.items())[:10]
-                for idx, (obj_id, obj) in enumerate(first_items, start=1):
-                    title = obj.get("object_title") or obj.get("title") or ""
-                    # Log a compact summary (id, title, top-level keys)
-                    _log("info", f"by_id[{idx}] id={obj_id!s} title={title!s} keys={list(obj.keys())[:10]}")
-                # Test presence of specific ids (case-insensitive)
-                try:
-                    # Build a lower-case lookup to allow case-insensitive matching of IDs
-                    lower_by_id = {str(k).lower(): k for k in by_id.keys()}
-                    test_ids = ["67AE0AF62729AAAD87B27FA1", "67ae0af62729aaad87b27fa1"]
-                    for test_id in test_ids:
-                        tid_l = str(test_id).lower()
-                        if tid_l in lower_by_id:
-                            real_key = lower_by_id[tid_l]
-                            obj = by_id[real_key]
-                            title = obj.get("object_title") or obj.get("title") or ""
-                            _log("info", f"by_id contains {test_id}: True (matched_key={real_key} title={title!s} keys={list(obj.keys())[:10]})")
-                        else:
-                            _log("info", f"by_id contains {test_id}: False")
-                except Exception as _e2:
-                    _log("info", f"Failed to inspect test id {test_id}: {_e2}")
-
-                # Also log first 10 entries from by_title for debugging
-                try:
-                    first_title_items = list(by_title.items())[:10]
-                    for idx, (title_key, obj) in enumerate(first_title_items, start=1):
-                        obj_id = obj.get("id") if isinstance(obj, dict) else None
-                        keys = list(obj.keys())[:10] if isinstance(obj, dict) else []
-                        _log("info", f"by_title[{idx}] title={title_key!s} id={obj_id!s} keys={keys}")
-                    # Test presence of a specific title and log result
-                    test_title = "(P) Database Applicatie"
-                    try:
-                        if test_title in by_title:
-                            obj = by_title[test_title]
-                            obj_id = obj.get("id") if isinstance(obj, dict) else None
-                            _log("info", f"by_title contains {test_title}: True (id={obj_id!s} keys={list(obj.keys())[:10] if isinstance(obj, dict) else []})")
-                        else:
-                            _log("info", f"by_title contains {test_title}: False")
-                    except Exception as _e3:
-                        _log("info", f"Failed to inspect test title {test_title}: {_e3}")
-                except Exception as _e4:
-                    _log("info", f"Failed to log by_title entries: {_e4}")
-            except Exception as _e:
-                _log("info", f"Failed to log by_id entries: {_e}")
 
         def get_detail(stub):
             try: return get_object(stub["id"])
@@ -879,8 +816,6 @@ def objects_flow():
             # Derive canonical English value (for comparison / payload) and detected language
             life_canon = _canonical_lifecycle(life_raw)
             life_lang = _lifecycle_lang(life_raw)
-            if _is_logging():
-                _log("error", f"obj_id_val {obj_id_val}: (title_target)={title_target}!")
 
             target_props: Dict[str, str] = {pname: ("" if pd.isna(r.get(csvc,"")) else str(r.get(csvc,"")))
                                             for pname, csvc in prop_map.items()}
@@ -917,8 +852,6 @@ def objects_flow():
                         id_unresolved = True
             else:
                 stub = by_title.get(title_target)
-            if _is_logging():
-                _log("error", f"obj_id_val {obj_id_val}: (had_id)={had_id}, (id_found)={id_found}, (title_found)={title_found}, (id_unresolved)={id_unresolved}!")
 
             # Build duplicate key only when both IDs are known (after resolving)
             curr_id = ""
