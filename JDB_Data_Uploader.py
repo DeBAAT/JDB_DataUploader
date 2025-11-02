@@ -3,8 +3,10 @@
 # This software is under an MIT License (see root of project)
 # v0.94:
 #   - Add option to store and re-use configuration settings.
-#   - Fixed matching by ID: now case insensitive.
+#   - Fixed matching by ID: now case insensitive; both for objects and relations.
 #   - Added support for Dutch lifecycle input.
+#   - Skip test existing when Label selected is (none).
+#   - Shows empty label text instead of "nan" value when excel cell is empty.
 # v0.93:
 #   - Relationships preview: keep the FIRST (from_id,to_id[,label]) and mark all later
 #     duplicates as "Skip: duplicate". First one still checks/obeys "Skip (exists)" and
@@ -1181,36 +1183,80 @@ def _get_relation_cached(rel_id: str) -> dict:
         _rel_detail_cache[rel_id] = get_relation(rel_id)
     return _rel_detail_cache[rel_id]
 
-def relation_exists_exact(template_id: str, from_id: str, to_id: str, label: str) -> bool:
+def relation_exists_exact(template_id: str, from_id: str, to_id: str, label: Optional[str]) -> bool:
+    """
+    Check whether a relation with given template/from/to exists.
+    If label is None, LABEL is ignored (match only template/from/to).
+    If label is provided (including empty string), the label must match exactly.
+    Comparison of IDs is done case-insensitively.
+    """
     if not (template_id and from_id and to_id):
         return False
+
+    # normalize for comparisons
+    tpl_norm = str(template_id).strip()
+    from_norm = str(from_id).strip()
+    to_norm = str(to_id).strip()
+    tpl_norm_l = tpl_norm.lower()
+    from_norm_l = from_norm.lower()
+    to_norm_l = to_norm.lower()
+
+    label_is_none = (label is None)
+    label_norm = "" if label is None else str(label)
+
     try:
+        # Try to fetch the source object as provided (may fail if casing mismatch)
         src = _get_object_cached(from_id)
     except Exception:
-        return False
+        # If fetching by provided id fails, try a best-effort: attempt to find an object
+        # in the local cache whose id matches case-insensitively (if available).
+        # If none found, give up and return False.
+        found = None
+        for obj in _obj_rel_cache.values():
+            try:
+                oid = str(obj.get("id", "")).strip()
+                if oid and oid.lower() == from_norm_l:
+                    found = obj
+                    break
+            except Exception:
+                continue
+        if not found:
+            return False
+        src = found
 
     rels = src.get("related_objects", []) or []
     for r in rels:
         try:
-            if str(r.get("object_id") or "") != str(to_id):
+            obj_id = str(r.get("object_id") or "").strip()
+            if not obj_id or obj_id.lower() != to_norm_l:
                 continue
+
             tpl = str(
                 (r.get("relationship") or {}).get("template_id")
                 or (r.get("type") or {}).get("id")
                 or ""
-            )
-            if tpl != str(template_id):
+            ).strip()
+            if tpl.lower() != tpl_norm_l:
                 continue
+
             rid = r.get("relationship_id")
             if not rid:
                 continue
             det = _get_relation_cached(str(rid))
-            if str(det.get("source_id") or "") != str(from_id):
+
+            src_id = str(det.get("source_id") or "").strip()
+            tgt_id = str(det.get("target_id") or "").strip()
+            if src_id.lower() != from_norm_l:
                 continue
-            if str(det.get("target_id") or "") != str(to_id):
+            if tgt_id.lower() != to_norm_l:
                 continue
+
+            # If caller passed label=None -> ignore label and consider this a match.
+            if label_is_none:
+                return True
+
             existing_label = str(det.get("remark") or det.get("label") or "")
-            if existing_label == (label or ""):
+            if existing_label == label_norm:
                 return True
         except Exception:
             continue
@@ -1439,6 +1485,7 @@ def relationships_flow():
         label_col = st.selectbox("Label (remark) column (optional)", cols, index=0, key="rel_label_col")
     with l2:
         lifecycle_col_rel = st.selectbox("Lifecycle column (optional)", cols, index=0, key="rel_lifecycle_col")
+
     st.caption("Lifecycle accepted values: **Current** / **Future**")
 
     st.header("R3) Preview")
@@ -1463,8 +1510,13 @@ def relationships_flow():
             t_id = "" if to_id_col == "(none)" else str(r.get(to_id_col) or "").strip()
             f_title = "" if from_title_col == "(none)" else str(r.get(from_title_col) or "").strip()
             t_title = "" if to_title_col == "(none)" else str(r.get(to_title_col) or "").strip()
-            lbl = "" if label_col == "(none)" else str(r.get(label_col) or "").strip()
             life = "" if lifecycle_col_rel == "(none)" else str(r.get(lifecycle_col_rel) or "").strip()
+            # Use pd.isna to avoid turning pandas NaN into the string "nan"
+            if label_col == "(none)":
+                lbl = ""
+            else:
+                val = r.get(label_col)
+                lbl = "" if pd.isna(val) else str(val).strip()
 
             if not f_id and f_title:
                 df_from = fetch_objects_df(workspace_id, from_def_id)
@@ -1497,11 +1549,14 @@ def relationships_flow():
             exists = False
             if not missing_ft and not errs and not is_dup_later:
                 try:
+                    # Determine label argument based on whether a Label column was mapped.
+                    # If no label column is mapped, pass None so relation_exists_exact ignores the label.
+                    label_arg = None if label_col == "(none)" else (lbl or "").strip()
                     exists = relation_exists_exact(
                         template_id=str(tpl_id).strip(),
                         from_id=str(f_id).strip(),
                         to_id=str(t_id).strip(),
-                        label=(lbl or "").strip()
+                        label=label_arg
                     )
                 except Exception:
                     exists = False
@@ -1607,4 +1662,3 @@ else:
         objects_flow()
     else:
         relationships_flow()
-
