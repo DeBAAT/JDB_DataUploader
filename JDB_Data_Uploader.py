@@ -1244,7 +1244,156 @@ def relationships_flow():
         to_def_id = def_map[to_name]
 
     st.info("The API does not expose relationship definitions. Enter the **Relationship Template ID** manually.")
-    tpl_id = st.text_input("Relationship Template ID", key="rel_tpl_manual", placeholder="e.g. 5a00543aec9d264840ae0619").strip()
+
+    # Allow user to choose source: manual entry or JSON config (with dropdown).
+    src = st.radio("Template ID source", ["Manual entry", "Use JSON config (dropdown)"], index=0, horizontal=True, key="rel_tpl_source")
+
+    def _parse_rel_tpl_config(cfg):
+        mapping = {}
+        if isinstance(cfg, dict):
+            for k, v in cfg.items():
+                if isinstance(v, str):
+                    mapping[str(k)] = v
+                elif isinstance(v, dict):
+                    vid = v.get("id") or v.get("template_id") or v.get("value") or v.get("templateId")
+                    if vid:
+                        mapping[str(k)] = vid
+        elif isinstance(cfg, list):
+            for item in cfg:
+                if not isinstance(item, dict):
+                    continue
+                name = item.get("name") or item.get("label") or item.get("title") or item.get("template_name")
+                vid = item.get("id") or item.get("template_id") or item.get("value") or item.get("templateId")
+                if name and vid:
+                    mapping[str(name)] = vid
+        return mapping
+
+    tpl_id = st.session_state.get("rel_tpl_manual", "") or ""
+
+    if src == "Manual entry":
+        # Manual input only
+        # If the user previously selected a template in the JSON dropdown, make sure that selected
+        # template ID is reflected in the manual input when switching back to Manual entry.
+        prev_sel = st.session_state.get("rel_tpl_select", "(none)")
+        rel_map = st.session_state.get("rel_tpl_map", {}) or {}
+        if prev_sel and prev_sel != "(none)":
+            # ensure the canonical manual session key contains the selected template id
+            st.session_state["rel_tpl_manual"] = rel_map.get(prev_sel, st.session_state.get("rel_tpl_manual", ""))
+
+        tpl_id = st.text_input("Relationship Template ID", key="rel_tpl_manual", placeholder="e.g. 5a00543aec9d264840ae0619")
+        # keep any previously loaded config but do not show dropdown
+        if st.session_state.get("rel_tpl_config") and st.button("Preview loaded templates", key="rel_tpl_preview_btn"):
+            cfg_preview = st.session_state.get("rel_tpl_config")
+            try:
+                def _tpl_preview_rows(cfg):
+                    rows = []
+                    if isinstance(cfg, dict):
+                        for k, v in cfg.items():
+                            if isinstance(v, (str, int, float)):
+                                rows.append({"name": str(k), "template_id": str(v)})
+                            elif isinstance(v, dict):
+                                vid = v.get("id") or v.get("template_id") or v.get("value") or v.get("templateId")
+                                rows.append({
+                                    "name": str(k),
+                                    "template_id": str(vid) if vid is not None else "",
+                                    "raw": json.dumps(v, ensure_ascii=False)
+                                })
+                            else:
+                                rows.append({"name": str(k), "template_id": str(v)})
+                    elif isinstance(cfg, list):
+                        for item in cfg:
+                            if not isinstance(item, dict):
+                                rows.append({"name": "", "template_id": str(item)})
+                                continue
+                            name = item.get("name") or item.get("label") or item.get("title") or item.get("template_name") or ""
+                            vid = item.get("id") or item.get("template_id") or item.get("value") or item.get("templateId") or ""
+                            rows.append({
+                                "name": str(name),
+                                "template_id": str(vid),
+                                "raw": json.dumps(item, ensure_ascii=False)
+                            })
+                    else:
+                        rows.append({"name": "", "template_id": str(cfg)})
+                    return rows
+
+                rows = _tpl_preview_rows(cfg_preview)
+                if rows:
+                    df_preview = pd.DataFrame(rows)
+                    st.info(f"Templates in loaded config: **{len(df_preview)}**.")
+                    st.dataframe(df_preview, use_container_width=True)
+                    # with st.expander("Show raw loaded JSON", expanded=False):
+                    #     st.json(cfg_preview)
+                else:
+                    st.info("No templates found in loaded config.")
+            except Exception:
+                st.info("Loaded config could not be parsed as templates.")
+    else:
+        # Use JSON config path: file uploader + dropdown
+        c1, c2 = st.columns([3, 1])
+        with c1:
+            rel_tpl_file = st.file_uploader("Upload templates (JSON)", type=["json"], key="rel_tpl_config_loader")
+            # allow previously loaded config to remain if user doesn't upload again
+            if rel_tpl_file:
+                try:
+                    cfg = json.load(rel_tpl_file)
+                    st.session_state["rel_tpl_config"] = cfg
+                    st.success("Loaded relationship templates configuration")
+                    if isinstance(cfg, dict):
+                        st.caption(f"{len(cfg)} templates loaded")
+                except Exception as e:
+                    st.error(f"Invalid JSON: {e}")
+        # Build dropdown from session-stored config (if present)
+        cfg_loaded = st.session_state.get("rel_tpl_config")
+        if cfg_loaded:
+            tpl_map = _parse_rel_tpl_config(cfg_loaded) or {}
+            # persist the map in session for use by callbacks / post-select logic
+            st.session_state["rel_tpl_map"] = tpl_map
+            if tpl_map:
+                opts = ["(none)"] + sorted(tpl_map.keys())
+
+                # Determine which option should be selected by default:
+                # priority: previously stored rel_tpl_select (if still valid) ->
+                #            current rel_tpl_manual matches a value in tpl_map ->
+                #            fallback "(none)"
+                prev_select = st.session_state.get("rel_tpl_select")
+                default_key = "(none)"
+                if prev_select in opts:
+                    default_key = prev_select
+                else:
+                    current_manual = str(st.session_state.get("rel_tpl_manual", "") or "").strip()
+                    if current_manual:
+                        # find the label that maps to this id
+                        for label, vid in tpl_map.items():
+                            if str(vid).strip() == current_manual:
+                                default_key = label
+                                break
+
+                # Show the selectbox. Use the stored key so Streamlit persists the selection.
+                try:
+                    sel_index = opts.index(default_key)
+                except Exception:
+                    sel_index = 0
+
+                st.selectbox("Choose template", opts, index=sel_index, key="rel_tpl_select")
+                # Immediately reflect the selection into the manual tpl input so downstream code
+                # reads a single canonical session key ("rel_tpl_manual").
+                sel = st.session_state.get("rel_tpl_select", "(none)")
+                rel_map = st.session_state.get("rel_tpl_map", {}) or {}
+                if sel and sel != "(none)":
+                    st.session_state["rel_tpl_manual"] = rel_map.get(sel, "")
+                else:
+                    # If user explicitly chose "(none)", clear the manual entry
+                    # but keep any previously typed manual input if the selection wasn't "(none)".
+                    if sel == "(none)":
+                        st.session_state["rel_tpl_manual"] = st.session_state.get("rel_tpl_manual", "")
+                # set tpl_id from the canonical session key
+                tpl_id = st.session_state.get("rel_tpl_manual", "") or ""
+            else:
+                st.caption("No templates found in uploaded JSON.")
+                tpl_id = ""
+        else:
+            st.info("Upload a JSON file describing templates, or switch to Manual entry.")
+            tpl_id = ""
 
     st.header("R2) Upload & map CSV / Excel")
     file = st.file_uploader("Choose file", type=["csv", "xlsx", "xls", "xlsm"], key=f"rel_uploader_{st.session_state.rel_upload_session}")
