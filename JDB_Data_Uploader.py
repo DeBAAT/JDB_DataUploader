@@ -3,6 +3,8 @@
 # This software is under an MIT License (see root of project)
 # v0.94:
 #   - Add option to store and re-use configuration settings.
+#   - Fixed matching by ID: now case insensitive.
+#   - Added support for Dutch lifecycle input.
 # v0.93:
 #   - Relationships preview: keep the FIRST (from_id,to_id[,label]) and mark all later
 #     duplicates as "Skip: duplicate". First one still checks/obeys "Skip (exists)" and
