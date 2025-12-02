@@ -1,6 +1,9 @@
 # BD_Data_Uploader_v0_95.py
 # Streamlit app to upload/update BlueDolphin objects + create relationships
 # This software is under an MIT License (see root of project)
+# v0.96:
+#    - Added support for multiple worksheets in excel file. If multiple sheets are found, user can select which one to use.
+#    - Added option to update object title if different from existing title.
 # v0.95:
 #    - Help update: Added link to https://bluedolphin-key-buddy.lovable.app/ for easy user api key creation
 #    - Help update: some additional changes for more clarity.
@@ -185,6 +188,7 @@ for k, v in [
     ("rel_upload_session", 0),
     ("prop_row_count", 1),
     ("boem_row_count", 1),
+    ("obj_update_title", True),
 ]:
     if k not in st.session_state: st.session_state[k] = v
 
@@ -706,6 +710,13 @@ def objects_flow():
     c1, c2 = st.columns([1, 1])
     with c1: st.markdown("**Object Title (required)**")
     with c2: title_col = st.selectbox("CSV column for title", list(df.columns), key="map_title", label_visibility="collapsed")
+    # Option: whether to update object title when import title differs from existing title
+    st.checkbox(
+        "Update object title if different",
+        value=st.session_state.get("obj_update_title", True),
+        key="obj_update_title",
+        help="If checked, objects whose title in the file differs from the existing object will be updated. Default: checked."
+    )
 
     c3, c4 = st.columns([1, 1])
     with c3: st.markdown("Object ID (optional)")
@@ -785,6 +796,8 @@ def objects_flow():
 
     preview_clicked = st.button("Generate preview", key="obj_preview_btn")
     if preview_clicked:
+        update_title_allowed = st.session_state.get("obj_update_title", True)
+
         with st.spinner("Retrieving existing objects…"):
             existing = list_objects(workspace_id, object_def_id)
 
@@ -912,9 +925,9 @@ def objects_flow():
 
                 row = {"Action":"Update","Object_Title":title_target,"Id":detail["id"],"Lifecycle":life_raw}
                 # mark Id invalid if the CSV supplied an ID that didn't resolve
-                mask_change = {"Action":False,"Object_Title":(title_target!=curr_title),"Id":False,"Lifecycle":False}
+                mask_change = {"Action":False,"Object_Title":(title_target!=curr_title and update_title_allowed),"Id":False,"Lifecycle":False}
                 mask_invalid = {"Action":False,"Object_Title":False,"Id":bool(id_unresolved),"Lifecycle":False}
-                any_change = (title_target!=curr_title)
+                any_change = (title_target!=curr_title and update_title_allowed)
 
                 if life_raw != "":
                     # Accept both Dutch and English inputs; determine canonical English value.
@@ -962,7 +975,7 @@ def objects_flow():
                         "new": False, "id": detail["id"],
                         "original_id_provided": obj_id_val if had_id else None,
                         "id_mismatch": bool(id_unresolved),
-                        "title_update": title_target if (title_target!=curr_title) else None,
+                        "title_update": title_target if (title_target!=curr_title and update_title_allowed) else None,
                         "title": title_target,
                         "boem_updates": boem_updates,
                         "prop_updates": prop_updates,
