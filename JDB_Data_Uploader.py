@@ -4,6 +4,8 @@
 # v0.96:
 #    - Added support for multiple worksheets in excel file. If multiple sheets are found, user can select which one to use.
 #    - Added option to update object title if different from existing title. Shows yellow warning when title is different but not changed.
+#    - Fixed validation of checkbox type input
+#    - Sort keys in saved configuration JSON for easier reading.
 # v0.95:
 #    - Help update: Added link to https://bluedolphin-key-buddy.lovable.app/ for easy user api key creation
 #    - Help update: some additional changes for more clarity.
@@ -114,7 +116,7 @@ with st.sidebar.expander("Configuration", expanded=False):
             except Exception:
                 cfg[k] = str(v)
 
-        cfg_json = json.dumps(cfg, indent=2, ensure_ascii=False)
+        cfg_json = json.dumps(cfg, indent=2, ensure_ascii=False, sort_keys=True)
 
         # Provide the JSON as a downloadable file (client-side download, no server save)
         date_str = datetime.date.today().strftime("%Y-%m-%d")
@@ -189,6 +191,8 @@ for k, v in [
     ("prop_row_count", 1),
     ("boem_row_count", 1),
     ("obj_update_title", True),
+    ("obj_selected_worksheet", None),
+    ("rel_selected_worksheet", None),
 ]:
     if k not in st.session_state: st.session_state[k] = v
 
@@ -633,8 +637,10 @@ def objects_flow():
                 sheet_names = list(books.keys())
                 if len(sheet_names) > 1:
                     sel = st.selectbox("Worksheet (multiple found)", sheet_names, index=0, help="Select which worksheet to use for processing")
+                    st.session_state["obj_selected_worksheet"] = sel
                     df = books[sel]
                 else:
+                    st.session_state["obj_selected_worksheet"] = sheet_names[0] if sheet_names else None
                     df = list(books.values())[0]
             else:
                 df = books
@@ -646,8 +652,10 @@ def objects_flow():
                 sheet_names = list(books.keys())
                 if len(sheet_names) > 1:
                     sel = st.selectbox("Worksheet (multiple found)", sheet_names, index=0, help="Select which worksheet to use for processing")
+                    st.session_state["obj_selected_worksheet"] = sel
                     df = books[sel]
                 else:
+                    st.session_state["obj_selected_worksheet"] = sheet_names[0] if sheet_names else None
                     df = list(books.values())[0]
             else:
                 df = books
@@ -1497,6 +1505,30 @@ def relationships_flow():
             df = pd.read_excel(file, engine="xlrd")
     except Exception as e:
         st.error(f"Could not read file: {e}"); st.stop()
+
+    # Handle multi-sheet Excel files for relationships
+    if not df.empty and (file.name.lower().endswith((".xlsx", ".xlsm", ".xls"))):
+        try:
+            n = file.name.lower()
+            if n.endswith((".xlsx", ".xlsm")):
+                if not ensure_pkg("openpyxl"): st.stop()
+                books = pd.read_excel(file, engine="openpyxl", sheet_name=None)
+            else:
+                if not ensure_pkg("xlrd"): st.stop()
+                books = pd.read_excel(file, engine="xlrd", sheet_name=None)
+            
+            if isinstance(books, dict):
+                sheet_names = list(books.keys())
+                if len(sheet_names) > 1:
+                    sel = st.selectbox("Worksheet (multiple found)", sheet_names, index=0, help="Select which worksheet to use for processing", key="rel_worksheet_select")
+                    st.session_state["rel_selected_worksheet"] = sel
+                    df = books[sel]
+                else:
+                    st.session_state["rel_selected_worksheet"] = sheet_names[0] if sheet_names else None
+        except Exception:
+            # If re-reading fails, continue with the original df
+            pass
+
     if df.empty:
         st.error("The uploaded file is empty."); st.stop()
     df.columns = [str(c) for c in df.columns]
