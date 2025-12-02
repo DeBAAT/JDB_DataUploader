@@ -605,10 +605,30 @@ def objects_flow():
             else: df = pd.read_csv(up, sep=csv_col_sep, engine="python")
         elif n.endswith((".xlsx", ".xlsm")):
             if not ensure_pkg("openpyxl"): st.stop()
-            df = pd.read_excel(up, engine="openpyxl")
+            # Read all sheets so we can offer a worksheet selector when the workbook contains multiple sheets.
+            books = pd.read_excel(up, engine="openpyxl", sheet_name=None)
+            if isinstance(books, dict):
+                sheet_names = list(books.keys())
+                if len(sheet_names) > 1:
+                    sel = st.selectbox("Worksheet (multiple found)", sheet_names, index=0, help="Select which worksheet to use for processing")
+                    df = books[sel]
+                else:
+                    df = list(books.values())[0]
+            else:
+                df = books
         else:
             if not ensure_pkg("xlrd"): st.stop()
-            df = pd.read_excel(up, engine="xlrd")
+            # For old-style .xls files, also support multiple sheets and let user pick if more than one exists.
+            books = pd.read_excel(up, engine="xlrd", sheet_name=None)
+            if isinstance(books, dict):
+                sheet_names = list(books.keys())
+                if len(sheet_names) > 1:
+                    sel = st.selectbox("Worksheet (multiple found)", sheet_names, index=0, help="Select which worksheet to use for processing")
+                    df = books[sel]
+                else:
+                    df = list(books.values())[0]
+            else:
+                df = books
     except Exception as e:
         st.error(f"Could not read file: {e}"); st.stop()
     if df.empty:
