@@ -514,6 +514,18 @@ def _parse_decimal_like(s: str) -> Optional[Decimal]:
     except InvalidOperation:
         return None
 
+def _parse_checkbox(s: str) -> Optional[str]:
+    """Normalize various boolean-like inputs to 'Yes' or 'No'. Return None for empty/unknown/invalid."""
+    if s is None: return None
+    v = str(s).strip()
+    if v == "": return None
+    m = v.lower().strip()
+    true_vals = {"yes","y","true","t","1","ja","j","waar","v","on","✓"}
+    false_vals = {"no","n","false","f","0","nee","ne","onwaar","off","✗","x"}
+    if m in true_vals: return "Yes"
+    if m in false_vals: return "No"
+    return None
+
 def _quantize(d: Decimal, decimals: Optional[int]) -> Decimal:
     if decimals is None: return d
     q = Decimal(10) ** -decimals
@@ -525,6 +537,9 @@ def _canon_for_compare(cfg: Dict, raw_val: str, multi_value_sep: str) -> str:
         if raw_val is None: return ""
         parts = [p.strip() for p in str(raw_val).split(multi_value_sep) if str(p).strip()!=""]
         return "|".join(sorted(parts))
+    if typ == "checkbox":
+        parsed = _parse_checkbox(raw_val)
+        return "" if parsed is None else parsed
     if typ in {"number","currency"}:
         d = _parse_decimal_like(raw_val)
         if d is None: return ""
@@ -538,6 +553,9 @@ def _canon_for_payload(cfg: Dict, raw_val: str, multi_value_sep: str) -> str:
     if typ == "dropdown_multi":
         parts = [p.strip() for p in str(raw_val).split(multi_value_sep) if str(p).strip()!=""]
         return "|".join(parts)
+    if typ == "checkbox":
+        parsed = _parse_checkbox(raw_val)
+        return "" if parsed is None else parsed
     if typ in {"number","currency"}:
         d = _parse_decimal_like(raw_val)
         if d is None: return ""
@@ -843,7 +861,9 @@ def objects_flow():
             t = cfg["type"]; allowed = cfg.get("allowed", set())
             v = "" if raw_val is None else str(raw_val).strip()
             if v == "": return True
-            if t == "checkbox": return v in {"Yes", "No"}
+            if t == "checkbox":
+                # Accept many boolean-like variants; valid if we can normalize to Yes/No
+                return _parse_checkbox(v) is not None
             if t in {"radio", "dropdown_single"}:
                 return (len(allowed)==0) or (v in allowed)
             if t == "dropdown_multi":
