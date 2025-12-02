@@ -1,4 +1,4 @@
-# BD_Data_Uploader_v0_95.py
+# BD_Data_Uploader_v0_96.py
 # Streamlit app to upload/update BlueDolphin objects + create relationships
 # This software is under an MIT License (see root of project)
 # v0.96:
@@ -60,7 +60,7 @@ def _lifecycle_lang(val: str) -> Optional[str]:
     if m in ("huidig", "toekomst"): return "nl"
     return None
 
-st.set_page_config(page_title="BlueDolphin Uploader v0.95", layout="wide")
+st.set_page_config(page_title="BlueDolphin Uploader v0.96", layout="wide")
 st.title("BlueDolphin CSV/Excel Uploader")
 
 # ---------------- Sidebar: connection + mode ----------------
