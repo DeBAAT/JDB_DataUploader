@@ -3,7 +3,7 @@
 # This software is under an MIT License (see root of project)
 # v0.96:
 #    - Added support for multiple worksheets in excel file. If multiple sheets are found, user can select which one to use.
-#    - Added option to update object title if different from existing title.
+#    - Added option to update object title if different from existing title. Shows yellow warning when title is different but not changed.
 # v0.95:
 #    - Help update: Added link to https://bluedolphin-key-buddy.lovable.app/ for easy user api key creation
 #    - Help update: some additional changes for more clarity.
@@ -831,7 +831,7 @@ def objects_flow():
         boem_cols = [f"questionnaire({qname})_{fname}" for (_,_,qname,fname) in boem_map.keys()]
         preview_cols += boem_cols
 
-        rows, change_rows, invalid_rows, meta = [], [], [], []
+        rows, change_rows, invalid_rows, warning_rows, meta = [], [], [], [], []
 
         def _digits_len_ok(val: str, max_digits: int = 16) -> bool:
             digits = re.findall(r"\d", val or "")
@@ -925,9 +925,12 @@ def objects_flow():
 
                 row = {"Action":"Update","Object_Title":title_target,"Id":detail["id"],"Lifecycle":life_raw}
                 # mark Id invalid if the CSV supplied an ID that didn't resolve
-                mask_change = {"Action":False,"Object_Title":(title_target!=curr_title and update_title_allowed),"Id":False,"Lifecycle":False}
+                title_diff = (title_target != curr_title)
+                mask_change = {"Action":False,"Object_Title":(title_diff and update_title_allowed),"Id":False,"Lifecycle":False}
                 mask_invalid = {"Action":False,"Object_Title":False,"Id":bool(id_unresolved),"Lifecycle":False}
-                any_change = (title_target!=curr_title and update_title_allowed)
+                # If title differs but updates are NOT allowed, mark a warning so preview shows yellow.
+                mask_warning = {"Action":False,"Object_Title":(title_diff and not update_title_allowed),"Id":False,"Lifecycle":False}
+                any_change = (title_diff and update_title_allowed)
 
                 if life_raw != "":
                     # Accept both Dutch and English inputs; determine canonical English value.
@@ -959,8 +962,12 @@ def objects_flow():
                     mask_invalid[key]= (changed and not valid)
                     any_change |= changed
 
-                if any_change:
-                    rows.append(row); change_rows.append(mask_change); invalid_rows.append(mask_invalid)
+                if any_change or mask_warning["Object_Title"]:
+                    rows.append(row)
+                    change_rows.append(mask_change)
+                    invalid_rows.append(mask_invalid)
+                    # keep a per-row warning mask aligned with rows[]
+                    warning_rows.append(mask_warning)
                     boem_updates: Dict[str, Dict[str,str]] = {}
                     for (qid,fid,qn,fn), csvc in boem_map.items():
                         newv = target_boem.get(qid, {}).get(fid, "")
@@ -998,7 +1005,7 @@ def objects_flow():
                     v = target_boem.get(qid, {}).get(fid, "")
                     row[key]=v; mask_change[key]=True
                     mask_invalid[key]= (v!="" and not _validate_value(qid,fid,v))
-                rows.append(row); change_rows.append(mask_change); invalid_rows.append(mask_invalid)
+                rows.append(row); change_rows.append(mask_change); invalid_rows.append(mask_invalid); warning_rows.append({"Action":False,"Object_Title":False,"Id":False,"Lifecycle":False})
                 lifecycle_val = life_canon if life_canon is not None else None
                 meta.append({
                     "new": True, "id": "", "title": title_target, "boem": target_boem, "props": target_props,
@@ -1015,15 +1022,22 @@ def objects_flow():
             preview_df = pd.DataFrame(rows, columns=preview_cols)
             change_df = pd.DataFrame(False, index=preview_df.index, columns=preview_df.columns)
             invalid_df = pd.DataFrame(False, index=preview_df.index, columns=preview_df.columns)
+            # warnings: title differs but user opted NOT to update titles -> show yellow in preview
+            warning_df = pd.DataFrame(False, index=preview_df.index, columns=preview_df.columns)
             for i, (mc, mi) in enumerate(zip(change_rows, invalid_rows)):
                 for k, v in mc.items():
                     if k in change_df.columns: change_df.loc[preview_df.index[i], k] = bool(v)
                 for k, v in mi.items():
                     if k in invalid_df.columns: invalid_df.loc[preview_df.index[i], k] = bool(v)
+                # populate warning_df if present
+                wr = warning_rows[i] if i < len(warning_rows) else {}
+                for k, v in (wr or {}).items():
+                    if k in warning_df.columns: warning_df.loc[preview_df.index[i], k] = bool(v)
 
             RED_BG, RED_FG   = "#ff8a8a", "#6b0000"
             BLUE_BG, BLUE_FG = "#cfe8ff", "#084298"
             GREEN_BG, GREEN_FG = "#b6f3b6", "#064b2d"
+            YELLOW_BG, YELLOW_FG = "#fff4b1", "#6b4b00"
 
             def style_cell(val, col, idx):
                 if col in ("Action"): return ""
@@ -1038,10 +1052,16 @@ def objects_flow():
                         return f"background-color:{bg}; color:{fg}; font-weight:600;"
                     return ""
                 inv = bool(invalid_df.loc[idx, col]) if col in invalid_df.columns else False
+                wrn = bool(warning_df.loc[idx, col]) if col in warning_df.columns else False
                 chg = bool(change_df.loc[idx, col]) if col in change_df.columns else False
-                if inv:   bg, fg = RED_BG, RED_FG
-                elif chg: bg, fg = BLUE_BG, BLUE_FG
-                else:     bg, fg = GREEN_BG, GREEN_FG
+                if inv:
+                    bg, fg = RED_BG, RED_FG
+                elif wrn:
+                    bg, fg = YELLOW_BG, YELLOW_FG
+                elif chg:
+                    bg, fg = BLUE_BG, BLUE_FG
+                else:
+                    bg, fg = GREEN_BG, GREEN_FG
                 return f"background-color:{bg}; color:{fg}; font-weight:600;"
 
             styled = preview_df.style.apply(lambda s: [style_cell(v, s.name, s.index[i]) for i, v in enumerate(s)], axis=0)
@@ -1050,6 +1070,7 @@ def objects_flow():
             st.session_state.preview_df = preview_df
             st.session_state.preview_mask_change = change_df
             st.session_state.preview_mask_invalid = invalid_df
+            st.session_state.preview_mask_warning = warning_df
             st.session_state.preview_meta = meta
             st.session_state.multi_value_sep = multi_value_sep
 
