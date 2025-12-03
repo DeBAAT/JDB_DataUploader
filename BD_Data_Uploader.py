@@ -1,6 +1,14 @@
-# BD_Data_Uploader_v0_94.py
+# BD_Data_Uploader_v0_96.py
 # Streamlit app to upload/update BlueDolphin objects + create relationships
 # This software is under an MIT License (see root of project)
+# v0.96:
+#    - Added support for multiple worksheets in excel file. If multiple sheets are found, user can select which one to use.
+#    - Added option to update object title if different from existing title. Shows yellow warning when title is different but not changed.
+#    - Fixed validation of checkbox type input
+#    - Sort keys in saved configuration JSON for easier reading.
+# v0.95:
+#    - Help update: Added link to https://bluedolphin-key-buddy.lovable.app/ for easy user api key creation
+#    - Help update: some additional changes for more clarity.
 # v0.94:
 #   - Add option to store and re-use configuration settings.
 #   - Fixed matching by ID: now case insensitive; both for objects and relations.
@@ -52,7 +60,7 @@ def _lifecycle_lang(val: str) -> Optional[str]:
     if m in ("huidig", "toekomst"): return "nl"
     return None
 
-st.set_page_config(page_title="BlueDolphin Uploader v0.94", layout="wide")
+st.set_page_config(page_title="BlueDolphin Uploader v0.96", layout="wide")
 st.title("BlueDolphin CSV/Excel Uploader")
 
 # ---------------- Sidebar: connection + mode ----------------
@@ -108,7 +116,7 @@ with st.sidebar.expander("Configuration", expanded=False):
             except Exception:
                 cfg[k] = str(v)
 
-        cfg_json = json.dumps(cfg, indent=2, ensure_ascii=False)
+        cfg_json = json.dumps(cfg, indent=2, ensure_ascii=False, sort_keys=True)
 
         # Provide the JSON as a downloadable file (client-side download, no server save)
         date_str = datetime.date.today().strftime("%Y-%m-%d")
@@ -182,6 +190,9 @@ for k, v in [
     ("rel_upload_session", 0),
     ("prop_row_count", 1),
     ("boem_row_count", 1),
+    ("obj_update_title", True),
+    ("obj_selected_worksheet", None),
+    ("rel_selected_worksheet", None),
 ]:
     if k not in st.session_state: st.session_state[k] = v
 
@@ -191,9 +202,33 @@ def render_help():
         st.markdown(
             """
 **API key & tenant**
-- Use a **User API key** (inherits your permissions). Treat it like a password.
-- Where do I get it? See the **Quick Start Guide** (steps to create a user API key).
-- **Tenant** = the part after **bluedolphin.app/**. Example: https://bluedolphin.app/mytenant → tenant = **mytenant**.
+- Create or use a **User API key** (inherits your permissions). Treat it like a password.
+- You can use either the **BlueDolphin User Key Buddy** or another tool (e.g. Postman) to create one.
+- The **Quick Start Guide** explains the process in detail, but the quick summary below is usually all you need.
+"""
+        )
+
+        st.link_button(
+            "BlueDolphin User Key Buddy",
+            "https://bluedolphin-key-buddy.lovable.app/",
+        )
+        st.link_button(
+            "Open Quick Start Guide",
+            "https://support.valueblue.nl/hc/en-us/articles/13296899552668-Quick-Start-Guide",
+        )
+
+        st.markdown(
+            r"""
+**Quick summary - The needed information from the quick start guide to create your key**
+- **Key Management API Key** = the key created in BlueDolphin of type *user key management* to create user API keys.
+- **Tenant name** = the part after **bluedolphin.app/**.  
+  Example: `https://bluedolphin.app/mytenant` → tenant = **mytenant**.
+- **User ID** = the Id of the user you want to create an API key for.  
+  Select the user in `admin\\users` and copy the Id from the URL.
+- **Key Name** = any name for recognition (e.g. “streamlit key for userX”).
+- **Expiration Date** = when the user API key expires. Treat this key as a password and rotate it regularly.
+
+---
 
 **Objects — how it works**
 - **Title** is required and must be **unique in your file**.
@@ -214,17 +249,13 @@ def render_help():
 **Relationships — how it works**
 - **Relationship template ID**: enter the ID manually (the API doesn’t list them).
 - **From / To**: pick the definitions and map IDs or Titles.
-- **Existing check**: we **skip** creating a relation if one already exists with the same **from**, **to**, **relationship type**, **direction**, and **label**.
+- **Existing check**: skips creation if a relation already exists with the same **from**, **to**, **relationship type**, **direction**, and **label**.
 - **Label**: optional free text attached to the relation.
 - **Lifecycle** (optional): Current or Future.
-- After apply, links to the **Relations** tab of each “from” object are shown.
+- After applying, links to the **Relations** tab of each “from” object are shown.
 """
         )
-        st.link_button(
-            "Open Quick Start Guide",
-            "https://support.valueblue.nl/hc/en-us/articles/13296899552668-Quick-Start-Guide",
-        )
-
+# shows help section
 render_help()
 
 # ---------------- Advanced (sidebar): logging + cache ----------------
@@ -487,6 +518,18 @@ def _parse_decimal_like(s: str) -> Optional[Decimal]:
     except InvalidOperation:
         return None
 
+def _parse_checkbox(s: str) -> Optional[str]:
+    """Normalize various boolean-like inputs to 'Yes' or 'No'. Return None for empty/unknown/invalid."""
+    if s is None: return None
+    v = str(s).strip()
+    if v == "": return None
+    m = v.lower().strip()
+    true_vals = {"yes","y","true","t","1","ja","j","waar","v","on","✓"}
+    false_vals = {"no","n","false","f","0","nee","ne","onwaar","off","✗","x"}
+    if m in true_vals: return "Yes"
+    if m in false_vals: return "No"
+    return None
+
 def _quantize(d: Decimal, decimals: Optional[int]) -> Decimal:
     if decimals is None: return d
     q = Decimal(10) ** -decimals
@@ -498,6 +541,9 @@ def _canon_for_compare(cfg: Dict, raw_val: str, multi_value_sep: str) -> str:
         if raw_val is None: return ""
         parts = [p.strip() for p in str(raw_val).split(multi_value_sep) if str(p).strip()!=""]
         return "|".join(sorted(parts))
+    if typ == "checkbox":
+        parsed = _parse_checkbox(raw_val)
+        return "" if parsed is None else parsed
     if typ in {"number","currency"}:
         d = _parse_decimal_like(raw_val)
         if d is None: return ""
@@ -511,6 +557,9 @@ def _canon_for_payload(cfg: Dict, raw_val: str, multi_value_sep: str) -> str:
     if typ == "dropdown_multi":
         parts = [p.strip() for p in str(raw_val).split(multi_value_sep) if str(p).strip()!=""]
         return "|".join(parts)
+    if typ == "checkbox":
+        parsed = _parse_checkbox(raw_val)
+        return "" if parsed is None else parsed
     if typ in {"number","currency"}:
         d = _parse_decimal_like(raw_val)
         if d is None: return ""
@@ -582,10 +631,34 @@ def objects_flow():
             else: df = pd.read_csv(up, sep=csv_col_sep, engine="python")
         elif n.endswith((".xlsx", ".xlsm")):
             if not ensure_pkg("openpyxl"): st.stop()
-            df = pd.read_excel(up, engine="openpyxl")
+            # Read all sheets so we can offer a worksheet selector when the workbook contains multiple sheets.
+            books = pd.read_excel(up, engine="openpyxl", sheet_name=None)
+            if isinstance(books, dict):
+                sheet_names = list(books.keys())
+                if len(sheet_names) > 1:
+                    sel = st.selectbox("Worksheet (multiple found)", sheet_names, index=0, help="Select which worksheet to use for processing")
+                    st.session_state["obj_selected_worksheet"] = sel
+                    df = books[sel]
+                else:
+                    st.session_state["obj_selected_worksheet"] = sheet_names[0] if sheet_names else None
+                    df = list(books.values())[0]
+            else:
+                df = books
         else:
             if not ensure_pkg("xlrd"): st.stop()
-            df = pd.read_excel(up, engine="xlrd")
+            # For old-style .xls files, also support multiple sheets and let user pick if more than one exists.
+            books = pd.read_excel(up, engine="xlrd", sheet_name=None)
+            if isinstance(books, dict):
+                sheet_names = list(books.keys())
+                if len(sheet_names) > 1:
+                    sel = st.selectbox("Worksheet (multiple found)", sheet_names, index=0, help="Select which worksheet to use for processing")
+                    st.session_state["obj_selected_worksheet"] = sel
+                    df = books[sel]
+                else:
+                    st.session_state["obj_selected_worksheet"] = sheet_names[0] if sheet_names else None
+                    df = list(books.values())[0]
+            else:
+                df = books
     except Exception as e:
         st.error(f"Could not read file: {e}"); st.stop()
     if df.empty:
@@ -663,6 +736,13 @@ def objects_flow():
     c1, c2 = st.columns([1, 1])
     with c1: st.markdown("**Object Title (required)**")
     with c2: title_col = st.selectbox("CSV column for title", list(df.columns), key="map_title", label_visibility="collapsed")
+    # Option: whether to update object title when import title differs from existing title
+    st.checkbox(
+        "Update object title if different",
+        value=st.session_state.get("obj_update_title", True),
+        key="obj_update_title",
+        help="If checked, objects whose title in the file differs from the existing object will be updated. Default: checked."
+    )
 
     c3, c4 = st.columns([1, 1])
     with c3: st.markdown("Object ID (optional)")
@@ -742,6 +822,8 @@ def objects_flow():
 
     preview_clicked = st.button("Generate preview", key="obj_preview_btn")
     if preview_clicked:
+        update_title_allowed = st.session_state.get("obj_update_title", True)
+
         with st.spinner("Retrieving existing objects…"):
             existing = list_objects(workspace_id, object_def_id)
 
@@ -775,7 +857,7 @@ def objects_flow():
         boem_cols = [f"questionnaire({qname})_{fname}" for (_,_,qname,fname) in boem_map.keys()]
         preview_cols += boem_cols
 
-        rows, change_rows, invalid_rows, meta = [], [], [], []
+        rows, change_rows, invalid_rows, warning_rows, meta = [], [], [], [], []
 
         def _digits_len_ok(val: str, max_digits: int = 16) -> bool:
             digits = re.findall(r"\d", val or "")
@@ -787,7 +869,9 @@ def objects_flow():
             t = cfg["type"]; allowed = cfg.get("allowed", set())
             v = "" if raw_val is None else str(raw_val).strip()
             if v == "": return True
-            if t == "checkbox": return v in {"Yes", "No"}
+            if t == "checkbox":
+                # Accept many boolean-like variants; valid if we can normalize to Yes/No
+                return _parse_checkbox(v) is not None
             if t in {"radio", "dropdown_single"}:
                 return (len(allowed)==0) or (v in allowed)
             if t == "dropdown_multi":
@@ -869,9 +953,12 @@ def objects_flow():
 
                 row = {"Action":"Update","Object_Title":title_target,"Id":detail["id"],"Lifecycle":life_raw}
                 # mark Id invalid if the CSV supplied an ID that didn't resolve
-                mask_change = {"Action":False,"Object_Title":(title_target!=curr_title),"Id":False,"Lifecycle":False}
+                title_diff = (title_target != curr_title)
+                mask_change = {"Action":False,"Object_Title":(title_diff and update_title_allowed),"Id":False,"Lifecycle":False}
                 mask_invalid = {"Action":False,"Object_Title":False,"Id":bool(id_unresolved),"Lifecycle":False}
-                any_change = (title_target!=curr_title)
+                # If title differs but updates are NOT allowed, mark a warning so preview shows yellow.
+                mask_warning = {"Action":False,"Object_Title":(title_diff and not update_title_allowed),"Id":False,"Lifecycle":False}
+                any_change = (title_diff and update_title_allowed)
 
                 if life_raw != "":
                     # Accept both Dutch and English inputs; determine canonical English value.
@@ -903,8 +990,12 @@ def objects_flow():
                     mask_invalid[key]= (changed and not valid)
                     any_change |= changed
 
-                if any_change:
-                    rows.append(row); change_rows.append(mask_change); invalid_rows.append(mask_invalid)
+                if any_change or mask_warning["Object_Title"]:
+                    rows.append(row)
+                    change_rows.append(mask_change)
+                    invalid_rows.append(mask_invalid)
+                    # keep a per-row warning mask aligned with rows[]
+                    warning_rows.append(mask_warning)
                     boem_updates: Dict[str, Dict[str,str]] = {}
                     for (qid,fid,qn,fn), csvc in boem_map.items():
                         newv = target_boem.get(qid, {}).get(fid, "")
@@ -919,7 +1010,7 @@ def objects_flow():
                         "new": False, "id": detail["id"],
                         "original_id_provided": obj_id_val if had_id else None,
                         "id_mismatch": bool(id_unresolved),
-                        "title_update": title_target if (title_target!=curr_title) else None,
+                        "title_update": title_target if (title_target!=curr_title and update_title_allowed) else None,
                         "title": title_target,
                         "boem_updates": boem_updates,
                         "prop_updates": prop_updates,
@@ -942,7 +1033,7 @@ def objects_flow():
                     v = target_boem.get(qid, {}).get(fid, "")
                     row[key]=v; mask_change[key]=True
                     mask_invalid[key]= (v!="" and not _validate_value(qid,fid,v))
-                rows.append(row); change_rows.append(mask_change); invalid_rows.append(mask_invalid)
+                rows.append(row); change_rows.append(mask_change); invalid_rows.append(mask_invalid); warning_rows.append({"Action":False,"Object_Title":False,"Id":False,"Lifecycle":False})
                 lifecycle_val = life_canon if life_canon is not None else None
                 meta.append({
                     "new": True, "id": "", "title": title_target, "boem": target_boem, "props": target_props,
@@ -959,15 +1050,22 @@ def objects_flow():
             preview_df = pd.DataFrame(rows, columns=preview_cols)
             change_df = pd.DataFrame(False, index=preview_df.index, columns=preview_df.columns)
             invalid_df = pd.DataFrame(False, index=preview_df.index, columns=preview_df.columns)
+            # warnings: title differs but user opted NOT to update titles -> show yellow in preview
+            warning_df = pd.DataFrame(False, index=preview_df.index, columns=preview_df.columns)
             for i, (mc, mi) in enumerate(zip(change_rows, invalid_rows)):
                 for k, v in mc.items():
                     if k in change_df.columns: change_df.loc[preview_df.index[i], k] = bool(v)
                 for k, v in mi.items():
                     if k in invalid_df.columns: invalid_df.loc[preview_df.index[i], k] = bool(v)
+                # populate warning_df if present
+                wr = warning_rows[i] if i < len(warning_rows) else {}
+                for k, v in (wr or {}).items():
+                    if k in warning_df.columns: warning_df.loc[preview_df.index[i], k] = bool(v)
 
             RED_BG, RED_FG   = "#ff8a8a", "#6b0000"
             BLUE_BG, BLUE_FG = "#cfe8ff", "#084298"
             GREEN_BG, GREEN_FG = "#b6f3b6", "#064b2d"
+            YELLOW_BG, YELLOW_FG = "#fff4b1", "#6b4b00"
 
             def style_cell(val, col, idx):
                 if col in ("Action"): return ""
@@ -982,10 +1080,16 @@ def objects_flow():
                         return f"background-color:{bg}; color:{fg}; font-weight:600;"
                     return ""
                 inv = bool(invalid_df.loc[idx, col]) if col in invalid_df.columns else False
+                wrn = bool(warning_df.loc[idx, col]) if col in warning_df.columns else False
                 chg = bool(change_df.loc[idx, col]) if col in change_df.columns else False
-                if inv:   bg, fg = RED_BG, RED_FG
-                elif chg: bg, fg = BLUE_BG, BLUE_FG
-                else:     bg, fg = GREEN_BG, GREEN_FG
+                if inv:
+                    bg, fg = RED_BG, RED_FG
+                elif wrn:
+                    bg, fg = YELLOW_BG, YELLOW_FG
+                elif chg:
+                    bg, fg = BLUE_BG, BLUE_FG
+                else:
+                    bg, fg = GREEN_BG, GREEN_FG
                 return f"background-color:{bg}; color:{fg}; font-weight:600;"
 
             styled = preview_df.style.apply(lambda s: [style_cell(v, s.name, s.index[i]) for i, v in enumerate(s)], axis=0)
@@ -994,6 +1098,7 @@ def objects_flow():
             st.session_state.preview_df = preview_df
             st.session_state.preview_mask_change = change_df
             st.session_state.preview_mask_invalid = invalid_df
+            st.session_state.preview_mask_warning = warning_df
             st.session_state.preview_meta = meta
             st.session_state.multi_value_sep = multi_value_sep
 
@@ -1400,6 +1505,30 @@ def relationships_flow():
             df = pd.read_excel(file, engine="xlrd")
     except Exception as e:
         st.error(f"Could not read file: {e}"); st.stop()
+
+    # Handle multi-sheet Excel files for relationships
+    if not df.empty and (file.name.lower().endswith((".xlsx", ".xlsm", ".xls"))):
+        try:
+            n = file.name.lower()
+            if n.endswith((".xlsx", ".xlsm")):
+                if not ensure_pkg("openpyxl"): st.stop()
+                books = pd.read_excel(file, engine="openpyxl", sheet_name=None)
+            else:
+                if not ensure_pkg("xlrd"): st.stop()
+                books = pd.read_excel(file, engine="xlrd", sheet_name=None)
+            
+            if isinstance(books, dict):
+                sheet_names = list(books.keys())
+                if len(sheet_names) > 1:
+                    sel = st.selectbox("Worksheet (multiple found)", sheet_names, index=0, help="Select which worksheet to use for processing", key="rel_worksheet_select")
+                    st.session_state["rel_selected_worksheet"] = sel
+                    df = books[sel]
+                else:
+                    st.session_state["rel_selected_worksheet"] = sheet_names[0] if sheet_names else None
+        except Exception:
+            # If re-reading fails, continue with the original df
+            pass
+
     if df.empty:
         st.error("The uploaded file is empty."); st.stop()
     df.columns = [str(c) for c in df.columns]
