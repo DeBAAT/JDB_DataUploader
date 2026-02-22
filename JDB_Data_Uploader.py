@@ -1,6 +1,8 @@
-# BD_Data_Uploader_v0_96.py
+# BD_Data_Uploader_v0_97.py
 # Streamlit app to upload/update BlueDolphin objects + create relationships
 # This software is under an MIT License (see root of project)
+# v0.97:
+#    - Fixed validation of dropdown_single type input for integer values
 # v0.96:
 #    - Added support for multiple worksheets in excel file. If multiple sheets are found, user can select which one to use.
 #    - Added option to update object title if different from existing title. Shows yellow warning when title is different but not changed.
@@ -548,6 +550,8 @@ def _canon_for_compare(cfg: Dict, raw_val: str, multi_value_sep: str) -> str:
         d = _parse_decimal_like(raw_val)
         if d is None: return ""
         d = _quantize(d, cfg.get("decimals"))
+        if _is_logging():
+            _log("ok", f"Compare → typ:{typ}, raw_val:{raw_val}, d:{d}, returned:{d:f}.")
         return f"{d:f}"
     return "" if raw_val is None else str(raw_val).strip()
 
@@ -864,10 +868,27 @@ def objects_flow():
             return 0 < len(digits) <= max_digits
         def _only_numberish_chars(val: str) -> bool:
             return re.fullmatch(r"\s*-?[\d.,\s]+\s*", val or "") is not None
+        def _get_validate_value(qid: str, fid: str):
+            cfg = field_config.get((qid, fid), {"type":"text","allowed":set()})
+            t = cfg["type"]; allowed = cfg.get("allowed", set())
+            v = target_boem.get(qid, {}).get(fid, "")
+            if t == "dropdown_single":
+                test_v = v
+                try:
+                    float_val = float(v)
+                    if float_val == int(float_val):
+                        test_v = str(int(float_val))
+                except (ValueError, TypeError):
+                    pass
+            if _is_logging():
+                _log("ok", f"_get_validate_value → t:{t}, v:{v}, test_v:{test_v}, allowed:{allowed}.")
+            return test_v
         def _validate_value(qid: str, fid: str, raw_val: str) -> bool:
             cfg = field_config.get((qid, fid), {"type":"text","allowed":set()})
             t = cfg["type"]; allowed = cfg.get("allowed", set())
             v = "" if raw_val is None else str(raw_val).strip()
+            if _is_logging():
+                _log("ok", f"_validate_value2 → t:{t}, v:{v}, allowed:{allowed}.")
             if v == "": return True
             if t == "checkbox":
                 # Accept many boolean-like variants; valid if we can normalize to Yes/No
@@ -906,6 +927,11 @@ def objects_flow():
             target_boem: Dict[str, Dict[str, str]] = {}
             for (qid,fid,qname,fname), csvc in boem_map.items():
                 val = "" if pd.isna(r.get(csvc,"")) else str(r.get(csvc,""))
+                r_val = r.get(csvc,"")
+                pd_isna = pd.isna(r.get(csvc,""))
+                if _is_logging():
+                    _log("ok", f"target_boem → qid:{qid}, fid:{fid}, pd_isna:{pd_isna}, r_val:{r_val}, val:{val}, csvc:{csvc}.")
+                    _log("ok", f"target_boem → r:{r}.")
                 target_boem.setdefault(qid, {})[fid] = val
 
             # Resolve by ID if provided; if ID not found, attempt to fall back to Title.
@@ -981,9 +1007,11 @@ def objects_flow():
 
                 for (qid,fid,qname,fname) in {(q,f,qn,fn) for (q,f,qn,fn) in boem_map.keys()}:
                     key=f"questionnaire({qname})_{fname}"
-                    newv = target_boem.get(qid, {}).get(fid, "")
+                    newv = _get_validate_value(qid,fid)
                     oldv = curr_boem.get(qid, {}).get(fid, "")
                     row[key]=newv
+                    if _is_logging():
+                        _log("ok", f"_validate_value → key:{key}, newv:{newv}, oldv:{oldv}.")
                     valid = _validate_value(qid,fid,newv)
                     changed = (not _equivalent(qid,fid,newv,oldv))
                     mask_change[key]=changed
