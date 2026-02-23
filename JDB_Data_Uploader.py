@@ -550,8 +550,6 @@ def _canon_for_compare(cfg: Dict, raw_val: str, multi_value_sep: str) -> str:
         d = _parse_decimal_like(raw_val)
         if d is None: return ""
         d = _quantize(d, cfg.get("decimals"))
-        if _is_logging():
-            _log("ok", f"Compare → typ:{typ}, raw_val:{raw_val}, d:{d}, returned:{d:f}.")
         return f"{d:f}"
     return "" if raw_val is None else str(raw_val).strip()
 
@@ -563,14 +561,10 @@ def _get_integer_value(raw_val: str):
             test_val = str(int(float_val))
     except (ValueError, TypeError):
         pass
-    if _is_logging():
-        _log("ok", f"_get_integer_value → raw_val:{raw_val}, test_val:{test_val}.")
     return test_val
 
 def _canon_for_payload(cfg: Dict, raw_val: str, multi_value_sep: str) -> str:
     typ = cfg.get("type","text")
-    if _is_logging():
-        _log("ok", f"_canon_for_payload → typ:{typ}, raw_val:{raw_val}.")
     if raw_val is None: return ""
     if typ == "dropdown_multi":
         parts = [p.strip() for p in str(raw_val).split(multi_value_sep) if str(p).strip()!=""]
@@ -897,15 +891,11 @@ def objects_flow():
                         test_v = str(int(float_val))
                 except (ValueError, TypeError):
                     pass
-            if _is_logging():
-                _log("ok", f"_get_validate_value → t:{t}, v:{v}, test_v:{test_v}, allowed:{allowed}.")
             return test_v
         def _validate_value(qid: str, fid: str, raw_val: str) -> bool:
             cfg = field_config.get((qid, fid), {"type":"text","allowed":set()})
             t = cfg["type"]; allowed = cfg.get("allowed", set())
             v = "" if raw_val is None else str(raw_val).strip()
-            if _is_logging():
-                _log("ok", f"_validate_value2 → t:{t}, v:{v}, allowed:{allowed}.")
             if v == "": return True
             if t == "checkbox":
                 # Accept many boolean-like variants; valid if we can normalize to Yes/No
@@ -946,9 +936,6 @@ def objects_flow():
                 val = "" if pd.isna(r.get(csvc,"")) else str(r.get(csvc,""))
                 r_val = r.get(csvc,"")
                 pd_isna = pd.isna(r.get(csvc,""))
-                if _is_logging():
-                    _log("ok", f"target_boem → qid:{qid}, fid:{fid}, pd_isna:{pd_isna}, r_val:{r_val}, val:{val}, csvc:{csvc}.")
-                    _log("ok", f"target_boem → r:{r}.")
                 target_boem.setdefault(qid, {})[fid] = val
 
             # Resolve by ID if provided; if ID not found, attempt to fall back to Title.
@@ -1027,8 +1014,6 @@ def objects_flow():
                     newv = _get_validate_value(qid,fid)
                     oldv = curr_boem.get(qid, {}).get(fid, "")
                     row[key]=newv
-                    if _is_logging():
-                        _log("ok", f"_validate_value → key:{key}, newv:{newv}, oldv:{oldv}.")
                     valid = _validate_value(qid,fid,newv)
                     changed = (not _equivalent(qid,fid,newv,oldv))
                     mask_change[key]=changed
