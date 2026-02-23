@@ -62,7 +62,7 @@ def _lifecycle_lang(val: str) -> Optional[str]:
     if m in ("huidig", "toekomst"): return "nl"
     return None
 
-st.set_page_config(page_title="BlueDolphin Uploader v0.96", layout="wide")
+st.set_page_config(page_title="BlueDolphin Uploader v0.97", layout="wide")
 st.title("BlueDolphin CSV/Excel Uploader")
 
 # ---------------- Sidebar: connection + mode ----------------
