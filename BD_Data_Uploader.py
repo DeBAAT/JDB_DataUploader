@@ -1,6 +1,8 @@
-# BD_Data_Uploader_v0_96.py
+# BD_Data_Uploader_v0_97.py
 # Streamlit app to upload/update BlueDolphin objects + create relationships
 # This software is under an MIT License (see root of project)
+# v0.97:
+#    - Fixed validation of dropdown_single type input for integer values
 # v0.96:
 #    - Added support for multiple worksheets in excel file. If multiple sheets are found, user can select which one to use.
 #    - Added option to update object title if different from existing title. Shows yellow warning when title is different but not changed.
@@ -60,7 +62,7 @@ def _lifecycle_lang(val: str) -> Optional[str]:
     if m in ("huidig", "toekomst"): return "nl"
     return None
 
-st.set_page_config(page_title="BlueDolphin Uploader v0.96", layout="wide")
+st.set_page_config(page_title="BlueDolphin Uploader v0.97", layout="wide")
 st.title("BlueDolphin CSV/Excel Uploader")
 
 # ---------------- Sidebar: connection + mode ----------------
@@ -551,6 +553,16 @@ def _canon_for_compare(cfg: Dict, raw_val: str, multi_value_sep: str) -> str:
         return f"{d:f}"
     return "" if raw_val is None else str(raw_val).strip()
 
+def _get_integer_value(raw_val: str):
+    test_val = raw_val
+    try:
+        float_val = float(raw_val)
+        if float_val == int(float_val):
+            test_val = str(int(float_val))
+    except (ValueError, TypeError):
+        pass
+    return test_val
+
 def _canon_for_payload(cfg: Dict, raw_val: str, multi_value_sep: str) -> str:
     typ = cfg.get("type","text")
     if raw_val is None: return ""
@@ -559,6 +571,9 @@ def _canon_for_payload(cfg: Dict, raw_val: str, multi_value_sep: str) -> str:
         return "|".join(parts)
     if typ == "checkbox":
         parsed = _parse_checkbox(raw_val)
+        return "" if parsed is None else parsed
+    if typ == "dropdown_single":
+        parsed = _get_integer_value(raw_val)
         return "" if parsed is None else parsed
     if typ in {"number","currency"}:
         d = _parse_decimal_like(raw_val)
@@ -864,6 +879,19 @@ def objects_flow():
             return 0 < len(digits) <= max_digits
         def _only_numberish_chars(val: str) -> bool:
             return re.fullmatch(r"\s*-?[\d.,\s]+\s*", val or "") is not None
+        def _get_validate_value(qid: str, fid: str):
+            cfg = field_config.get((qid, fid), {"type":"text","allowed":set()})
+            t = cfg["type"]; allowed = cfg.get("allowed", set())
+            v = target_boem.get(qid, {}).get(fid, "")
+            test_v = v
+            if t == "dropdown_single":
+                try:
+                    float_val = float(v)
+                    if float_val == int(float_val):
+                        test_v = str(int(float_val))
+                except (ValueError, TypeError):
+                    pass
+            return test_v
         def _validate_value(qid: str, fid: str, raw_val: str) -> bool:
             cfg = field_config.get((qid, fid), {"type":"text","allowed":set()})
             t = cfg["type"]; allowed = cfg.get("allowed", set())
@@ -906,6 +934,8 @@ def objects_flow():
             target_boem: Dict[str, Dict[str, str]] = {}
             for (qid,fid,qname,fname), csvc in boem_map.items():
                 val = "" if pd.isna(r.get(csvc,"")) else str(r.get(csvc,""))
+                r_val = r.get(csvc,"")
+                pd_isna = pd.isna(r.get(csvc,""))
                 target_boem.setdefault(qid, {})[fid] = val
 
             # Resolve by ID if provided; if ID not found, attempt to fall back to Title.
@@ -981,7 +1011,7 @@ def objects_flow():
 
                 for (qid,fid,qname,fname) in {(q,f,qn,fn) for (q,f,qn,fn) in boem_map.keys()}:
                     key=f"questionnaire({qname})_{fname}"
-                    newv = target_boem.get(qid, {}).get(fid, "")
+                    newv = _get_validate_value(qid,fid)
                     oldv = curr_boem.get(qid, {}).get(fid, "")
                     row[key]=newv
                     valid = _validate_value(qid,fid,newv)
