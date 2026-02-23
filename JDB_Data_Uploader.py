@@ -555,14 +555,31 @@ def _canon_for_compare(cfg: Dict, raw_val: str, multi_value_sep: str) -> str:
         return f"{d:f}"
     return "" if raw_val is None else str(raw_val).strip()
 
+def _get_integer_value(raw_val: str):
+    test_val = raw_val
+    try:
+        float_val = float(raw_val)
+        if float_val == int(float_val):
+            test_val = str(int(float_val))
+    except (ValueError, TypeError):
+        pass
+    if _is_logging():
+        _log("ok", f"_get_integer_value → raw_val:{raw_val}, test_val:{test_val}.")
+    return test_val
+
 def _canon_for_payload(cfg: Dict, raw_val: str, multi_value_sep: str) -> str:
     typ = cfg.get("type","text")
+    if _is_logging():
+        _log("ok", f"_canon_for_payload → typ:{typ}, raw_val:{raw_val}.")
     if raw_val is None: return ""
     if typ == "dropdown_multi":
         parts = [p.strip() for p in str(raw_val).split(multi_value_sep) if str(p).strip()!=""]
         return "|".join(parts)
     if typ == "checkbox":
         parsed = _parse_checkbox(raw_val)
+        return "" if parsed is None else parsed
+    if typ == "dropdown_single":
+        parsed = _get_integer_value(raw_val)
         return "" if parsed is None else parsed
     if typ in {"number","currency"}:
         d = _parse_decimal_like(raw_val)
@@ -872,8 +889,8 @@ def objects_flow():
             cfg = field_config.get((qid, fid), {"type":"text","allowed":set()})
             t = cfg["type"]; allowed = cfg.get("allowed", set())
             v = target_boem.get(qid, {}).get(fid, "")
+            test_v = v
             if t == "dropdown_single":
-                test_v = v
                 try:
                     float_val = float(v)
                     if float_val == int(float_val):
